@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CUCM Call Analyzer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 7h16M4 12h16M4 17h16' stroke='%230b6e72' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/><path d="M8 4l-4 2 4 2" /><path d="M16 10l4 2-4 2"/><path d="M8 16l-4 2 4 2"/></svg>
+    <span>CUCM Call Analyzer</span>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="calls" class="on">Calls</button>
+    <button data-view="call" id="tab-call" hidden>Call detail</button>
+    <button data-view="data">Data</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+  <div class="stats" id="stats"></div>
+  <button class="iconbtn" id="theme" title="Toggle light / dark" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+</header>
+
+<main class="page">
+
+  <!-- ===================== CALLS ===================== -->
+  <section class="view on" id="view-calls">
+    <div class="panel">
+      <header><h2>Find a call</h2><span class="sub">searches the CDRs loaded in the Data tab</span></header>
+      <form id="searchform" class="row">
+        <label class="f grow">Any number<input type="text" name="number" placeholder="e.g. 2001 or 5551234567"></label>
+        <label class="f">Calling<input type="text" name="calling" size="12"></label>
+        <label class="f">Called<input type="text" name="called" size="12"></label>
+        <label class="f">Device<input type="text" name="device" size="14" placeholder="SEP… / trunk"></label>
+        <label class="f">From<input type="datetime-local" name="start"></label>
+        <label class="f">To<input type="datetime-local" name="end"></label>
+        <label class="chk"><input type="checkbox" name="failed"> Failed / abnormal only</label>
+        <button class="btn primary" type="submit">Search</button>
+        <button class="btn" type="reset" id="resetsearch">Reset</button>
+      </form>
+      <p class="hint">Times in the search form are interpreted in <b>UTC</b>, the same as the results.</p>
+    </div>
+    <div class="tablewrap" id="callstable"><div class="empty">Loading…</div></div>
+  </section>
+
+  <!-- ===================== CALL DETAIL ===================== -->
+  <section class="view" id="view-call">
+    <div class="panel" id="callbar">
+      <div class="row" style="align-items:center">
+        <button class="btn" id="backbtn">← Calls</button>
+        <button class="btn primary" id="sdlbtn">Pull SDL traces from CUCM</button>
+        <a class="btn" id="exportbtn" href="#">Export HTML report</a>
+        <span class="sub" id="callbarmsg" style="color:var(--ink-3)"></span>
+      </div>
+      <div id="sdljob"></div>
+    </div>
+    <div id="callroot"></div>
+  </section>
+
+  <!-- ===================== DATA ===================== -->
+  <section class="view" id="view-data">
+    <div class="grid">
+      <div class="panel">
+        <header><h2>Pull CDR / CMR from CUCM</h2><span class="sub">CDR on Demand API</span></header>
+        <div class="row">
+          <label class="f">Start (UTC)<input type="datetime-local" id="cdr-start"></label>
+          <label class="f">End (UTC)<input type="datetime-local" id="cdr-end"></label>
+          <button class="btn primary" id="cdr-pull">Fetch files</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn small" data-quick="60">Last hour</button>
+          <button class="btn small" data-quick="240">Last 4 h</button>
+          <button class="btn small" data-quick="1440">Last 24 h</button>
+        </div>
+        <p class="hint">CDR files are written when a call ends, then pushed to the CDR repository about once a minute. The window is split into hourly requests; files already loaded are skipped.</p>
+        <div id="cdrjob"></div>
+      </div>
+      <div class="panel">
+        <header><h2>Upload files</h2><span class="sub">CDR / CMR flat files, SDL traces (.txt, .gz, .zip)</span></header>
+        <div class="drop" id="drop">Drop files here, or click to choose<input type="file" id="filepick" multiple hidden></div>
+        <div class="row" style="margin-top:10px">
+          <label class="f">Node name for SDL files<input type="text" id="up-node" placeholder="auto from RTMT zip path"></label>
+          <label class="f">SDL trace date<input type="date" id="up-date"></label>
+        </div>
+        <p class="hint">SDL lines carry a time of day only. Zip files from RTMT are dated from their entries; for loose files, give the date the trace was collected. Times are read in the server timezone set in Settings.</p>
+        <div id="upresult"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <header><h2>Loaded data</h2>
+        <span class="sub" id="datasummary"></span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn small danger" data-clear="sip">Clear SIP traces</button>
+          <button class="btn small danger" data-clear="cdr">Clear CDR/CMR</button>
+        </span></header>
+      <div class="tablewrap" style="max-height:340px"><table><thead><tr><th>Loaded</th><th>Kind</th><th>File</th><th>Node</th><th class="num">Records</th><th class="num">Size</th></tr></thead><tbody id="filesbody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ===================== SETTINGS ===================== -->
+  <section class="view" id="view-settings">
+    <form id="settingsform">
+      <fieldset><legend>CUCM</legend>
+        <div class="formgrid">
+          <label class="f">Publisher host (CDR Repository node)<input type="text" name="cucm.host" placeholder="cucm-pub.example.com"></label>
+          <label class="f">Application user<input type="text" name="cucm.user" autocomplete="off"></label>
+          <label class="f">Password<input type="password" name="secret.cucm_password" autocomplete="new-password" placeholder="(unchanged)"></label>
+          <label class="f">Server timezone (for SDL times)<input type="text" name="cucm.server_tz" placeholder="America/New_York"></label>
+          <label class="f">DNS domain for short node names<input type="text" name="cucm.domain" placeholder="example.com"></label>
+          <label class="chk" style="align-self:end"><input type="checkbox" name="cucm.verify_tls"> Verify TLS certificate</label>
+          <label class="f wide">Node addresses (one per line: <code>NODENAME=ip-or-fqdn</code>), used when a node name does not resolve in DNS
+            <textarea name="cucm.node_addresses" placeholder="CUCM-SUB1=10.1.1.11"></textarea></label>
+        </div>
+        <p class="hint">The user needs the <b>Standard CCM Admin Users</b> role plus access to <b>Standard SERVICEABILITY / Real-Time and Trace Collection</b> (the Standard RealtimeAndTraceCollection role). Read-only: the app only lists and downloads.</p>
+      </fieldset>
+      <fieldset><legend>How CUCM delivers CDR files</legend>
+        <div class="formgrid">
+          <label class="f">Mode<select name="cdr_delivery.mode"><option value="embedded">Built-in SFTP receiver (this app)</option><option value="external">My own SFTP server</option></select></label>
+        </div>
+        <div class="formgrid" id="emb-fields" style="margin-top:12px">
+          <label class="f">Address CUCM uses to reach this app<input type="text" name="cdr_delivery.advertise_host" placeholder="auto-detected"></label>
+          <label class="f">Listen port<input type="number" name="cdr_delivery.listen_port"></label>
+          <label class="f">SFTP user<input type="text" name="cdr_delivery.username"></label>
+          <label class="f">SFTP password<input type="password" name="secret.sftp_password" placeholder="(random per run unless set)"></label>
+        </div>
+        <div class="formgrid" id="ext-fields" style="margin-top:12px">
+          <label class="f">SFTP host<input type="text" name="cdr_delivery.external_host"></label>
+          <label class="f">Port<input type="number" name="cdr_delivery.external_port"></label>
+          <label class="f">User<input type="text" name="cdr_delivery.external_user"></label>
+          <label class="f">Password<input type="password" name="secret.external_sftp_password" placeholder="(unchanged)"></label>
+          <label class="f">Remote directory<input type="text" name="cdr_delivery.external_dir"></label>
+          <label class="f">…or local folder it maps to<input type="text" name="cdr_delivery.external_local_path"></label>
+        </div>
+        <p class="hint" id="recvstatus"></p>
+        <p class="hint">CDR on Demand cannot return file contents over SOAP: CUCM connects out to an SFTP server and uploads the file. CUCM always connects to port 22. The built-in receiver needs rights to listen there (or a port forward 22 → listen port).</p>
+      </fieldset>
+      <fieldset><legend>SDL trace collection</legend>
+        <div class="formgrid">
+          <label class="f">Service<input type="text" name="sdl.service"></label>
+          <label class="f">Seconds before call<input type="number" name="sdl.pad_before_s"></label>
+          <label class="f">Seconds after call<input type="number" name="sdl.pad_after_s"></label>
+          <label class="f">Max files per node per pull<input type="number" name="sdl.max_files_per_node"></label>
+        </div>
+        <p class="hint">SDL tracing must be on for Cisco CallManager (Trace Configuration → Debug level ≥ Detailed, with "SIP Call Processing Trace" enabled), otherwise no SIP messages are written.</p>
+      </fieldset>
+      <div class="row">
+        <button class="btn primary" type="submit">Save</button>
+        <button class="btn" type="button" id="testbtn">Save &amp; test connection</button>
+        <button class="btn" type="button" id="discoverbtn">Discover nodes</button>
+      </div>
+      <pre class="joblog" id="testout" hidden></pre>
+    </form>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script src="/static/callview.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

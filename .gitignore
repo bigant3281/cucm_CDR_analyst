@@ -1,0 +1,8 @@
+data/
+__pycache__/
+*.pyc
+.venv/
+*.key
+config.json
+cca.sqlite*
+tests/out/
