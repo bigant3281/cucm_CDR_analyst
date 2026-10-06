@@ -54,4 +54,13 @@ def rec(flags, data, typ=b"", id_=b""):
             + id_ + b"\0" * p(len(id_)) + typ + b"\0" * p(len(typ)) + data + b"\0" * p(len(data)))
 dime = rec(0b00001000 | 0b100, b"<soap/>", b"text/xml") + rec(0b00000010, b"HELLO LOG FILE", b"application/octet-stream")
 eq(soap.extract_attachment("application/dime", dime), b"HELLO LOG FILE", "DIME attachment extracted")
+# Multipart/MTOM-wrapped SOAP reply is unwrapped; empty reply gives a readable error
+b = "MIMEBoundary123"
+mp = (f'--{b}\r\nContent-Type: application/xop+xml; charset=UTF-8; type="text/xml"\r\nContent-ID: <0@x>\r\n\r\n<a>ok</a>\r\n--{b}--\r\n').encode()
+eq(soap._soap_text(f'multipart/related; boundary={b}; type="application/xop+xml"', mp, ""), "<a>ok</a>", "MTOM reply unwrapped")
+try:
+    soap._xml("", "listNodeServiceLogs"); ok = False
+except soap.SoapError:
+    ok = True
+eq(ok, True, "empty reply raises SoapError, not ParseError")
 print("\nALL UNIT CHECKS PASSED")

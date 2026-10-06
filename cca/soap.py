@@ -88,7 +88,8 @@ class CucmSoap:
         last = ""
         for attempt in range(retries + len(actions)):
             hdr = {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": actions[ai],
-                   "Accept": "text/xml, multipart/related, application/dime, */*"}
+                   "Accept": ("text/xml, multipart/related, application/dime, */*" if raw
+                              else "text/xml, application/soap+xml")}
             try:
                 r = self.s.post(url, data=data, headers=hdr, timeout=self.timeout, verify=self.s.verify)
             except requests.exceptions.SSLError as e:
@@ -106,7 +107,8 @@ class CucmSoap:
             if r.status_code == 404:
                 raise SoapError(f"{url} returned 404 (service not available on this node/version)")
             ctype = r.headers.get("Content-Type", "")
-            text = "" if ("multipart" in ctype or "dime" in ctype) else r.text
+            text = _soap_text(ctype, r.content, r.text) if not raw else (
+                "" if ("multipart" in ctype or "dime" in ctype) else r.text)
             flt = _fault(text) if text else None
             if r.status_code in (429, 503) or (flt and any(h in flt.lower() for h in THROTTLE_HINTS)):
                 last = flt or f"HTTP {r.status_code}"
@@ -170,7 +172,7 @@ class CucmSoap:
     def list_node_service_logs(self) -> dict[str, list[str]]:
         body = "<soap:listNodeServiceLogs><soap:ListRequest></soap:ListRequest></soap:listNodeServiceLogs>"
         text = self._post(self.url(LOG_PATH), body, "listNodeServiceLogs", "LogCollectionPort")
-        root = ET.fromstring(text)
+        root = _xml(text, "listNodeServiceLogs")
         out: dict[str, list[str]] = {}
         for el in root.iter():
             if _local(el.tag) == "listNodeServiceLogsReturn":
@@ -200,7 +202,7 @@ class CucmSoap:
                 "<soap:RemoteFolder></soap:RemoteFolder>"
                 "</soap:FileSelectionCriteria></soap:selectLogFiles>")
         text = self._post(self.url(LOG_PATH, node_host), body, "selectLogFiles", "LogCollectionPort")
-        root = ET.fromstring(text)
+        root = _xml(text, "selectLogFiles")
         files = []
         for el in root.iter():
             if _local(el.tag) == "File":
@@ -238,6 +240,33 @@ def _file_ts(name: str) -> datetime | None:
     if not m:
         return None
     return datetime.strptime(m.group(1), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+
+
+def _soap_text(content_type: str, content: bytes, text: str) -> str:
+    """XML of a SOAP reply, unwrapping a multipart/MTOM envelope if CUCM sent one."""
+    if "multipart" not in content_type.lower():
+        return text
+    try:
+        msg = email.message_from_bytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + content,
+                                       policy=email.policy.HTTP)
+        for part in msg.walk():
+            if not part.is_multipart() and "xml" in part.get_content_type():
+                return part.get_payload(decode=True).decode("utf-8", "replace")
+    except Exception:
+        pass
+    return text
+
+
+def _xml(text: str, op: str):
+    if not (text or "").strip():
+        raise SoapError(f"{op}: CUCM returned an empty reply (HTTP 200 with no body). "
+                        "Check the user has the Standard RealtimeAndTraceCollection role and that the "
+                        "Cisco Log Partition Monitoring / Cisco Trace Collection services are running on the node.")
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError as e:
+        snippet = re.sub(r"\s+", " ", text[:300])
+        raise SoapError(f"{op}: reply was not valid XML ({e}). Start of reply: {snippet}")
 
 
 def extract_attachment(content_type: str, payload: bytes) -> bytes:
