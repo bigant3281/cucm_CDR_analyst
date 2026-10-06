@@ -16,6 +16,23 @@ from paramiko.sftp import SFTP_FAILURE, SFTP_NO_SUCH_FILE, SFTP_OK, SFTP_PERMISS
 log = logging.getLogger("cca.sftp")
 
 
+def _enable_legacy_host_keys() -> None:
+    """CUCM's SFTP client negotiates the SHA-1 'ssh-rsa' host key (Cisco documents this for
+    CUCM 14+). Paramiko 4/5 no longer offer it, which fails with 'no acceptable host key'.
+    Offer it again, after the modern algorithms so up-to-date clients still pick those."""
+    prefs = tuple(getattr(paramiko.Transport, "_preferred_keys", ()))
+    if "ssh-rsa" not in prefs:
+        paramiko.Transport._preferred_keys = prefs + ("ssh-rsa",)
+    # ...and newer RSAKey has no SHA-1 entry to sign with, so add it back.
+    hashes_map = getattr(paramiko.RSAKey, "HASHES", None)
+    if isinstance(hashes_map, dict) and "ssh-rsa" not in hashes_map:
+        from cryptography.hazmat.primitives import hashes
+        hashes_map["ssh-rsa"] = hashes.SHA1
+
+
+_enable_legacy_host_keys()
+
+
 class _Server(paramiko.ServerInterface):
     def __init__(self, user: str, password_fn):
         self.user, self.password_fn = user, password_fn

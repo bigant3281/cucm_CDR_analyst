@@ -44,6 +44,8 @@ Passwords are kept in memory only (or set `CUCM_PASSWORD`, `CCA_SFTP_PASSWORD`, 
 
 SDL lines carry a time of day only, so each file is dated from its modified time (an entry later than that time is placed on the previous day). Set *Server timezone* correctly or ladders will be offset from the CDR.
 
+**SFTP host key:** CUCM's SFTP client negotiates the legacy SHA-1 `ssh-rsa` host key, which current paramiko releases no longer offer. The built-in receiver re-enables it (see `cca/sftp_receiver.py`), so `Incompatible ssh peer (no acceptable host key)` should not occur. If you see a *kex* or *cipher* error instead, send the log line; those can be re-enabled the same way.
+
 ## Matching SIP dialogs to a call
 
 SDL traces contain every SIP dialog on the node. A dialog is tied to the CDR call when:
