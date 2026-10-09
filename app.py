@@ -108,7 +108,9 @@ def create_app(data_dir: str | Path) -> FastAPI:
             raise HTTPException(400, "end must be after start")
         if (e - s).total_seconds() > 7 * 86400:
             raise HTTPException(400, "window is limited to 7 days per fetch")
-        job = svc.run_job("cdr", f"CDRs {s:%m/%d %H:%M}–{e:%H:%M} UTC", svc.fetch_cdrs, s, e)
+        with_sdl = bool(body.get("sdl", False))
+        job = svc.run_job("cdr", f"CDRs{' + SDL' if with_sdl else ''} {s:%m/%d %H:%M}–{e:%H:%M} UTC",
+                          svc.fetch_window, s, e, with_sdl)
         return job.view()
 
     @app.post("/api/upload")

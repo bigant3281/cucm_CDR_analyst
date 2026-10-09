@@ -131,7 +131,7 @@
   $("#cdr-pull").onclick = async () => {
     $("#cdr-pull").disabled = true;
     try {
-      const j = await post("/api/cdr/fetch", { start: localToUtcIso($("#cdr-start").value), end: localToUtcIso($("#cdr-end").value) });
+      const j = await post("/api/cdr/fetch", { start: localToUtcIso($("#cdr-start").value), end: localToUtcIso($("#cdr-end").value), sdl: $("#cdr-sdl").checked });
       await watchJob(j.id, $("#cdrjob"));
       await loadStatus(); search();
     } catch (e) { toast(e.message, true); }

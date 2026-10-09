@@ -18,7 +18,7 @@ python app.py                       # http://127.0.0.1:8080
 ```
 
 1. **Settings** → publisher host, application user, password, server timezone → *Save & test connection*.
-2. **Data** → pick a time window → *Fetch files* (or drop CDR/CMR/SDL files onto the upload box).
+2. **Data** → pick a time window → *Fetch files*. With *Also pull SDL traces for this window* ticked (default), the SDL traces for the same window are downloaded first, then the CDR/CMR files. (Or drop CDR/CMR/SDL files onto the upload box.)
 3. **Calls** → search by number / device / time → open a call.
 4. On the call page → *Pull SDL traces from CUCM* → the ladder appears.
 
@@ -40,7 +40,7 @@ Passwords are kept in memory only (or set `CUCM_PASSWORD`, `CCA_SFTP_PASSWORD`, 
 * **Built-in SFTP receiver** (default): the app runs a small single-user SFTP server. CUCM always connects to **port 22**, so either run with rights to listen on 22, or forward 22 → the listen port. Set *Address CUCM uses to reach this app* to this machine's IP as the publisher sees it.
 * **Your own SFTP server**: enter its host/user/password/dir. If it writes to a folder this machine can read, give that path; otherwise the app downloads the file over SFTP.
 
-**SDL traces** use the Log Collection API (`selectLogFiles` with `DownloadtoClient`, then `GetOneFile`) against every node: it lists SDL files modified in the call window and downloads only those. Node names that don't resolve in DNS can be mapped under *Node addresses*.
+**SDL traces** are pulled with the CDRs for the whole window (so they are kept before CUCM rotates them; raw files are saved under `data/sdl/<node>/`), or per call from the call page. Both use the Log Collection API (`selectLogFiles` with `DownloadtoClient`, then `GetOneFile`) against every node: it lists SDL files modified in the window and downloads only those. Caps: `max_window_files_per_node` (default 400) for window pulls, `max_files_per_node` (40) for single-call pulls. If a cap is hit the job log says which time range was kept. Node names that don't resolve in DNS can be mapped under *Node addresses*.
 
 SDL lines carry a time of day only, so each file is dated from its modified time (an entry later than that time is placed on the previous day). Set *Server timezone* correctly or ladders will be offset from the CDR.
 

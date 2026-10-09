@@ -101,6 +101,26 @@ html = requests.get(f"{B}/api/call/export", params={"key": k1}).text
 check("renderCall" in html and "svg" in html.lower() and len(html) > 30000, "HTML export is self-contained")
 d1b = requests.get(f"{B}/api/call", params={"key": k1, "dialogs": sel[0]["call_id"]}).json()
 check(sum(x["selected"] for x in d1b["ladder"]["dialogs"]) == 1, "dialog selection honoured")
+# window pull: CDR + SDL together (SDL stored raw on disk, survives CUCM rotation)
+import os
+requests.post(f"{B}/api/clear", json={"what": "sip"})
+check(requests.get(f"{B}/api/status").json()["stats"]["sip"] == 0, "SIP data cleared")
+j = requests.post(f"{B}/api/cdr/fetch", json={"start": "2026-10-05T19:00:00Z", "end": "2026-10-05T20:00:00Z", "sdl": True}).json()
+v = job(j); print("\n".join(v["log"]))
+check(v["state"] == "done" and v["result"].get("sip_added", 0) > 30, f"window pull fetched SDL with the CDR step ({v['result']})")
+check(v["log"][0].startswith(tuple("0123456789")) and "Step 1/2: SDL" in " ".join(v["log"][:2]), "SDL pulled first")
+check(requests.get(f"{B}/api/status").json()["stats"]["cdr"] == 3, "CDRs not duplicated on re-fetch")
+sdl_files = [p for p in Path(data, "sdl").rglob("*.txt")]
+check(len(sdl_files) >= 1, f"raw SDL file kept on disk: {sdl_files[0].relative_to(data) if sdl_files else None}")
+d = requests.get(f"{B}/api/call", params={"key": k1}).json()
+check(len([x for x in d["ladder"]["dialogs"] if x["selected"]]) == 2, "ladder ready without a per-call pull")
+j = requests.post(f"{B}/api/call/sdl", json={"key": k1}).json(); v = job(j)
+check(v["state"] == "done" and v["result"]["sip_added"] == 0, "per-call pull is a no-op once the window was pulled")
+# SDL failure must not block the CDR step
+j = requests.post(f"{B}/api/settings", json={"cucm": {"node_addresses": {"cucm-pub": "127.0.0.1:1", "cucm-sub1": "127.0.0.1:1"}}})
+requests.post(f"{B}/api/clear", json={"what": "cdr"})
+j = requests.post(f"{B}/api/cdr/fetch", json={"start": "2026-10-05T19:00:00Z", "end": "2026-10-05T20:00:00Z", "sdl": True}).json(); v = job(j)
+check(requests.get(f"{B}/api/status").json()["stats"]["cdr"] == 3, "CDRs still loaded when SDL nodes are unreachable")
 up = requests.post(f"{B}/api/upload", files=[("files", ("sdl.txt", (ROOT / "tests" / "out" / "SDL.txt").read_bytes()))],
                    data={"node": "uploaded-node", "trace_date": "2026-10-05"}).json() if (ROOT / "tests" / "out" / "SDL.txt").exists() else None
 print(f"\nALL {ok_count} CHECKS PASSED")

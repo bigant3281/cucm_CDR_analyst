@@ -96,8 +96,9 @@ class CucmSoap:
                 raise SoapError(f"TLS error talking to {url}: {e}. Set verify_tls to false or give a CA bundle.")
             except requests.RequestException as e:
                 last = f"{type(e).__name__}: {e}"
-                if attempt < retries:
-                    time.sleep(delay); delay = min(delay * 2, 60)
+                # Connection refused / unreachable is not throttling: retry once quickly, then fail.
+                if attempt < 1:
+                    time.sleep(2)
                     continue
                 raise SoapError(f"cannot reach {url}: {last}")
             if r.status_code == 401:

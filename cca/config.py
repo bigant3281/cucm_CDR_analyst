@@ -36,7 +36,8 @@ DEFAULTS = {
         "external_local_path": "",  # if the external SFTP server writes to a folder this app can read
     },
     "sdl": {
-        "max_files_per_node": 40,
+        "max_files_per_node": 40,          # per-call pull
+        "max_window_files_per_node": 400,  # window pull alongside CDRs
         "pad_before_s": 60,
         "pad_after_s": 60,
         "service": "Cisco CallManager",

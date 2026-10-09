@@ -31,6 +31,13 @@ class Job:
         self.result: dict = {}
         self.started = time.time()
         self.finished: float | None = None
+        self._base, self._span = 0.0, 1.0
+
+    def phase(self, base: float, span: float):
+        self._base, self._span = base, span
+
+    def prog(self, frac: float):
+        self.progress = self._base + self._span * max(0.0, min(1.0, frac))
 
     def log(self, msg: str, level=logging.INFO):
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -141,7 +148,7 @@ class Service:
         todo = [n for n in names if n not in have]
         job.log(f"{len(names)} files on the CDR Repository, {len(todo)} not loaded yet")
         if not todo:
-            job.result = {"files": 0, "records": 0}
+            job.result = {**job.result, "files": 0, "records": 0}
             return
         if d["mode"] == "embedded":
             st = self.receiver_status()
@@ -179,8 +186,8 @@ class Service:
             (self.cfg.cdr_dir / name).write_bytes(data)
             total_recs += n
             job.log(f"{name}: {kind or 'not a CDR/CMR file'}, {n} records")
-            job.progress = i / len(todo)
-        job.result = {"files": len(todo), "records": total_recs}
+            job.prog(i / len(todo))
+        job.result = {**job.result, "files": len(todo), "records": total_recs}
 
     def _collect_pushed(self, name: str, ev: threading.Event) -> bytes:
         d = self.cfg.settings["cdr_delivery"]
@@ -217,13 +224,20 @@ class Service:
 
     # ------------------------------------------------------------ SDL
     def fetch_sdl(self, job: Job, call_key: str, nodes: list[str] | None = None):
+        """SDL traces around one call (its CDR window plus the configured padding)."""
         cdrs, _ = self.store.call(call_key)
         if not cdrs:
             raise SoapError("call not found")
         sd = self.cfg.settings["sdl"]
         start, end = correlate.window(cdrs, sd["pad_before_s"], sd["pad_after_s"])
-        s_dt = datetime.fromtimestamp(start, tz=timezone.utc)
-        e_dt = datetime.fromtimestamp(end, tz=timezone.utc)
+        self.pull_sdl_window(job, datetime.fromtimestamp(start, tz=timezone.utc),
+                             datetime.fromtimestamp(end, tz=timezone.utc), nodes, int(sd["max_files_per_node"]))
+
+    def pull_sdl_window(self, job: Job, s_dt: datetime, e_dt: datetime,
+                        nodes: list[str] | None, cap: int) -> int:
+        """List, download and index CallManager SDL files covering [s_dt, e_dt] on every node.
+        Raw files are kept under data/sdl/<node>/ so they survive CUCM trace rotation."""
+        sd = self.cfg.settings["sdl"]
         soap = self.soap()
         nodes = nodes or self.cfg.settings["cucm"]["nodes"] or self.discover_nodes()
         tz = self.server_tz()
@@ -252,11 +266,13 @@ class Service:
                 if f["mdt"] > e_dt:
                     break
             pick += [f for f in sdl_files if not f["mdt"]][:2]
-            cap = int(sd["max_files_per_node"])
             if len(pick) > cap:
-                job.log(f"{node}: {len(pick)} trace files cover the window; taking the first {cap} (raise the limit in Settings)", logging.WARNING)
+                last = pick[cap - 1]["mdt"]
+                job.log(f"{node}: {len(pick)} trace files cover the window; keeping the first {cap}"
+                        + (f" (up to {last.astimezone(timezone.utc):%H:%M:%S} UTC)" if last else "")
+                        + ". Raise the limit in Settings or use a shorter window.", logging.WARNING)
                 pick = pick[:cap]
-            job.log(f"{node}: {len(sdl_files)} SDL files listed, {len(pick)} cover the call")
+            job.log(f"{node}: {len(sdl_files)} SDL files listed, {len(pick)} cover the window")
             for fi, f in enumerate(pick):
                 key = f"sdl:{node}:{f['path']}:{f['size']}:{f['modified']}"
                 if self.store.has_file(key):
@@ -274,8 +290,34 @@ class Service:
                 added = self.store.load_sip(key, f["name"], node, len(data), msgs, {"path": f["path"]})
                 total += added
                 job.log(f"{node}: {f['name']} → {len(msgs)} SIP messages")
-                job.progress = (ni + (fi + 1) / max(len(pick), 1)) / len(nodes)
-        job.result = {"sip_added": total}
+                job.prog((ni + (fi + 1) / max(len(pick), 1)) / len(nodes))
+        job.result = {**job.result, "sip_added": total}
+        return total
+
+    # ------------------------------------------------------------ CDR + SDL together
+    def fetch_window(self, job: Job, start_utc: datetime, end_utc: datetime, with_sdl: bool = True):
+        """CDR/CMR for a window and, optionally, the SDL traces for the same window.
+        SDL goes first: CUCM rotates trace files quickly on busy clusters, while the CDR
+        repository keeps its files far longer. A failure in one half does not stop the other."""
+        errors = []
+        if with_sdl:
+            sd = self.cfg.settings["sdl"]
+            pad_b, pad_a = timedelta(seconds=int(sd["pad_before_s"])), timedelta(seconds=int(sd["pad_after_s"]))
+            job.log("Step 1/2: SDL traces for the window (pulled first, they rotate fastest)")
+            job.phase(0.0, 0.6)
+            try:
+                self.pull_sdl_window(job, start_utc - pad_b, end_utc + pad_a, None,
+                                     int(sd.get("max_window_files_per_node", 400)))
+            except SoapError as e:
+                errors.append(f"SDL: {e}"); job.log(f"SDL pull failed: {e}", logging.ERROR)
+            job.log("Step 2/2: CDR/CMR files")
+            job.phase(0.6, 0.4)
+        try:
+            self.fetch_cdrs(job, start_utc, end_utc)
+        except SoapError as e:
+            errors.append(f"CDR: {e}"); job.log(f"CDR pull failed: {e}", logging.ERROR)
+        if errors:
+            raise SoapError("; ".join(errors))
 
     # ------------------------------------------------------------ uploads
     def ingest_upload(self, name: str, data: bytes, node: str = "", trace_date: str = "") -> list[dict]:

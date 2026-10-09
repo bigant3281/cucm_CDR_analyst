@@ -69,6 +69,7 @@
           <label class="f">End (UTC)<input type="datetime-local" id="cdr-end"></label>
           <button class="btn primary" id="cdr-pull">Fetch files</button>
         </div>
+        <label class="chk" style="margin-top:10px"><input type="checkbox" id="cdr-sdl" checked> Also pull SDL traces for this window (all nodes)</label>
         <div class="row" style="margin-top:8px">
           <button class="btn small" data-quick="60">Last hour</button>
           <button class="btn small" data-quick="240">Last 4 h</button>
@@ -141,7 +142,8 @@
           <label class="f">Service<input type="text" name="sdl.service"></label>
           <label class="f">Seconds before call<input type="number" name="sdl.pad_before_s"></label>
           <label class="f">Seconds after call<input type="number" name="sdl.pad_after_s"></label>
-          <label class="f">Max files per node per pull<input type="number" name="sdl.max_files_per_node"></label>
+          <label class="f">Max files per node, single-call pull<input type="number" name="sdl.max_files_per_node"></label>
+          <label class="f">Max files per node, window pull<input type="number" name="sdl.max_window_files_per_node"></label>
         </div>
         <p class="hint">SDL tracing must be on for Cisco CallManager (Trace Configuration → Debug level ≥ Detailed, with "SIP Call Processing Trace" enabled), otherwise no SIP messages are written.</p>
       </fieldset>
