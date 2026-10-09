@@ -71,9 +71,9 @@
         </div>
         <label class="chk" style="margin-top:10px"><input type="checkbox" id="cdr-sdl" checked> Also pull SDL traces for this window (all nodes)</label>
         <div class="row" style="margin-top:8px">
+          <button class="btn small" data-quick="5">Last 5 min</button>
+          <button class="btn small" data-quick="10">Last 10 min</button>
           <button class="btn small" data-quick="60">Last hour</button>
-          <button class="btn small" data-quick="240">Last 4 h</button>
-          <button class="btn small" data-quick="1440">Last 24 h</button>
         </div>
         <p class="hint">CDR files are written when a call ends, then pushed to the CDR repository about once a minute. The window is split into hourly requests; files already loaded are skipped.</p>
         <div id="cdrjob"></div>
