@@ -86,6 +86,9 @@ class H(BaseHTTPRequestHandler):
                     files = ""
                 return self._send(200, env(f'<ns1:selectLogFilesResponse xmlns:ns1="{NS}"><ns1:ResultSet><ns1:SchemaFileSelectionResult><ns1:Node><ns1:name/><ns1:ServiceList><ns1:ServiceLogs><ns1:SetOfFiles>{files}</ns1:SetOfFiles></ns1:ServiceLogs></ns1:ServiceList></ns1:Node></ns1:SchemaFileSelectionResult></ns1:ResultSet></ns1:selectLogFilesResponse>'))
         if "DimeGetFileService" in p:
+            if "<soap:GetOneFile>" not in body:   # Axis dispatches on the first Body element
+                first = re.search(r"<soap:Body>\s*<soap:(\w+)|<soapenv:Body>\s*<soap:(\w+)", body)
+                return self._send(500, fault(f"No such operation '{(first.group(1) or first.group(2)) if first else '?'}'"))
             fn = re.search(r"<soap:FileName>(.*?)</soap:FileName>", body).group(1)
             if fn != SDL_INFO["path"]:
                 return self._send(500, fault("File not found: " + fn))

@@ -27,7 +27,9 @@ NS = "http://schemas.cisco.com/ast/soap"
 
 CDR_PATH = "/CDRonDemandService2/services/CDRonDemandService"
 LOG_PATH = "/logcollectionservice2/services/LogCollectionPortTypeService"
-DIME_PATH = "/logcollectionservice/services/DimeGetFileService"
+DIME_PATHS = ["/logcollectionservice/services/DimeGetFileService",
+              "/logcollectionservice2/services/DimeGetFileService",
+              "/logcollectionservice2/services/LogCollectionPortTypeService"]
 
 THROTTLE_HINTS = ("exceeded", "rate", "too many", "throttl", "maximum", "try again")
 DISPATCH_HINTS = ("epr", "operation not found", "no such operation", "no handler",
@@ -215,9 +217,25 @@ class CucmSoap:
         return files
 
     def get_one_file(self, node_host: str, abs_path: str) -> bytes:
-        body = f"<soap:FileName>{escape(abs_path)}</soap:FileName>"
-        r = self._post(self.url(DIME_PATH, node_host), body, "GetOneFile", "LogCollectionPort", raw=True)
-        return extract_attachment(r.headers.get("Content-Type", ""), r.content)
+        """Download one log file. The operation element must wrap FileName: CUCM dispatches on
+        the first element in <Body>, so a bare <FileName> fails with "No such operation 'FileName'"."""
+        body = f"<soap:GetOneFile><soap:FileName>{escape(abs_path)}</soap:FileName></soap:GetOneFile>"
+        # The download service lives at a different path on different CUCM releases; remember the one that works.
+        paths = ([self._dime_path] if getattr(self, "_dime_path", None) else []) + \
+                [p for p in DIME_PATHS if p != getattr(self, "_dime_path", None)]
+        last: SoapError | None = None
+        for path in paths:
+            try:
+                r = self._post(self.url(path, node_host), body, "GetOneFile", "LogCollectionPort", raw=True)
+            except SoapError as e:
+                msg = str(e).lower()
+                if "404" in msg or "no such operation" in msg or "not available" in msg:
+                    last = e
+                    continue
+                raise
+            self._dime_path = path
+            return extract_attachment(r.headers.get("Content-Type", ""), r.content)
+        raise last or SoapError("GetOneFile: no download endpoint answered")
 
 
 # ---------------------------------------------------------------------------
